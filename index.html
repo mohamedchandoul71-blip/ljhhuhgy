@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Cactus & Eucalyptus Flowering Map</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <style>
+        body { margin: 0; padding: 0; font-family: Arial, sans-serif; display: flex; height: 100vh; background-color: #f4f6f9; }
+        #sidebar { width: 350px; background: #ffffff; box-shadow: 2px 0 5px rgba(0,0,0,0.1); display: flex; flex-direction: column; z-index: 1000; overflow-y: auto; padding: 20px; }
+        #map { flex-grow: 1; height: 100%; }
+        h2 { font-size: 1.25rem; color: #2c3e50; margin-top: 0; margin-bottom: 15px; border-bottom: 2px solid #ecf0f1; padding-bottom: 10px; }
+        .filter-group { margin-bottom: 15px; }
+        label { display: block; font-weight: bold; font-size: 0.85rem; color: #34495e; margin-bottom: 5px; }
+        input, select, button { width: 100%; padding: 8px 10px; box-sizing: border-box; border: 1px solid #bdc3c7; border-radius: 4px; font-size: 0.9rem; }
+        button { background-color: #27ae60; color: white; border: none; cursor: pointer; font-weight: bold; margin-top: 10px; transition: background 0.2s; }
+        button:hover { background-color: #219653; }
+        #reset-btn { background-color: #e74c3c; }
+        #reset-btn:hover { background-color: #c0392b; }
+        .stats-panel { background: #f8f9fa; border-left: 4px solid #27ae60; padding: 10px; margin-bottom: 15px; font-size: 0.9rem; }
+        .legend { margin-top: 20px; font-size: 0.85rem; background: #fff; border: 1px solid #ddd; padding: 10px; border-radius: 4px; }
+        .legend-item { display: flex; align-items: center; margin-bottom: 5px; }
+        .legend-color { width: 16px; height: 16px; margin-right: 8px; border-radius: 3px; }
+        #loading { display: none; text-align: center; color: #7f8c8d; font-size: 0.85rem; margin-top: 10px; }
+        #error-msg { display: none; color: #c0392b; font-size: 0.85rem; margin-top: 10px; background: #fadbd8; padding: 8px; border-radius: 4px; }
+    </style>
+</head>
+<body>
+
+    <div id="sidebar">
+        <h2>Flowering Map</h2>
+        
+        <div class="stats-panel">
+            <strong>Matching Parcels:</strong> <span id="parcel-count">0</span>
+        </div>
+
+        <div class="filter-group">
+            <label for="date-select">Select Date:</label>
+            <input type="date" id="date-select">
+        </div>
+
+        <div class="filter-group">
+            <label for="species-select">Plant Type:</label>
+            <select id="species-select">
+                <option value="all">All Species</option>
+            </select>
+        </div>
+
+        <div class="filter-group">
+            <label for="radius-select">Geographic Filter (Radius from Click):</label>
+            <select id="radius-select">
+                <option value="none">No Radius Filter</option>
+                <option value="5">5 km around clicked point</option>
+                <option value="10">10 km around clicked point</option>
+                <option value="20">20 km around clicked point</option>
+            </select>
+        </div>
+
+        <button id="reset-btn">Reset All Filters</button>
+
+        <div id="loading">Loading parcels...</div>
+        <div id="error-msg"></div>
+
+        <div class="legend">
+            <strong>Legend</strong>
+            <div class="legend-item">
+                <div class="legend-color" style="background-color: #e74c3c; opacity: 0.6;"></div>
+                <span>Expected to be flowering</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background-color: #3498db; opacity: 0.6;"></div>
+                <span>Not flowering / Outside period</span>
+            </div>
+        </div>
+    </div>
+
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script>
+        const map = L.map('map').setView([34.08, 9.81], 11);
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(map);
+
+        let geojsonLayer = null;
+        let allParcelsData = null;
+        let radiusCircle = null;
+        let centerPoint = null;
+
+        const dateSelect = document.getElementById('date-select');
+        const speciesSelect = document.getElementById('species-select');
+        const radiusSelect = document.getElementById('radius-select');
+        const resetBtn = document.getElementById('reset-btn');
+        const parcelCountEl = document.getElementById('parcel-count');
+        const loadingEl = document.getElementById('loading');
+        const errorMsgEl = document.getElementById('error-msg');
+
+        // Timezone-safe local date string generation (YYYY-MM-DD)
+        function getLocalDateTimeString() {
+            const now = new Date();
+            const year = now.getFullYear();
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const day = String(now.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+        dateSelect.value = getLocalDateTimeString();
+
+        map.on('click', (e) => {
+            centerPoint = e.latlng;
+            if (radiusSelect.value !== 'none') {
+                renderParcels(allParcelsData);
+            }
+        });
+
+        async function fetchSpeciesList() {
+            try {
+                const response = await fetch('/api/species');
+                const species = await response.json();
+                species.forEach(sp => {
+                    const opt = document.createElement('option');
+                    opt.value = sp;
+                    opt.textContent = sp;
+                    speciesSelect.appendChild(opt);
+                });
+            } catch (err) {
+                console.error("Failed to load species list", err);
+            }
+        }
+
+        async function loadParcels() {
+            loadingEl.style.display = 'block';
+            errorMsgEl.style.display = 'none';
+
+            const date = dateSelect.value;
+            const species = speciesSelect.value;
+
+            try {
+                const url = `/api/parcels?date=${date}&species=${encodeURIComponent(species)}`;
+                const response = await fetch(url);
+                if (!response.ok) throw new Error("Failed to fetch parcel data");
+                
+                const data = await response.json();
+                allParcelsData = data;
+                renderParcels(data);
+            } catch (err) {
+                errorMsgEl.textContent = err.message;
+                errorMsgEl.style.display = 'block';
+            } finally {
+                loadingEl.style.display = 'none';
+            }
+        }
+
+        function renderParcels(data) {
+            if (geojsonLayer) map.removeLayer(geojsonLayer);
+
+            let featuresToRender = data.features;
+            const radiusKm = radiusSelect.value;
+
+            if (radiusKm !== 'none') {
+                if (!centerPoint) centerPoint = map.getCenter();
+                const rMeters = parseFloat(radiusKm) * 1000;
+
+                if (radiusCircle) map.removeLayer(radiusCircle);
+                radiusCircle = L.circle(centerPoint, { radius: rMeters, color: '#e67e22', fillColor: '#f39c12', fillOpacity: 0.1 }).addTo(map);
+
+                featuresToRender = featuresToRender.filter(f => {
+                    if (f.geometry && f.geometry.type === 'Polygon') {
+                        const coords = f.geometry.coordinates[0];
+                        let sumLat = 0, sumLng = 0;
+                        coords.forEach(c => { sumLng += c[0]; sumLat += c[1]; });
+                        const centroid = L.latLng(sumLat / coords.length, sumLng / coords.length);
+                        return centerPoint.distanceTo(centroid) <= rMeters;
+                    }
+                    return true;
+                });
+            } else {
+                if (radiusCircle) {
+                    map.removeLayer(radiusCircle);
+                    radiusCircle = null;
+                }
+            }
+
+            parcelCountEl.textContent = featuresToRender.length;
+
+            geojsonLayer = L.geoJSON({ type: "FeatureCollection", features: featuresToRender }, {
+                style: function(feature) {
+                    return {
+                        fillColor: feature.properties.isFlowering ? '#e74c3c' : '#3498db',
+                        weight: 2,
+                        opacity: 1,
+                        color: 'white',
+                        dashArray: '3',
+                        fillOpacity: 0.6
+                    };
+                },
+                onEachFeature: function(feature, layer) {
+                    const p = feature.properties;
+                    const popupContent = `
+                        <div style="font-family: Arial, sans-serif; font-size: 0.9rem;">
+                            <strong>Parcel ID:</strong> ${p.parcelId || 'N/A'}<br>
+                            <strong>Surface Area:</strong> ${p.superficie > 0 ? p.superficie + ' m²' : 'Unspecified'}<br>
+                            <strong>Plant Type(s):</strong> ${p.speciesRaw || 'Unknown'}<br>
+                            <strong>Dominant Species:</strong> ${p.dominantSpecies || 'Unknown'}<br>
+                            <strong>Flowering Period:</strong> ${p.floweringPeriod || 'N/A'}<br>
+                            <strong>Status:</strong> <span style="color: ${p.isFlowering ? '#c0392b' : '#2980b9'}; font-weight: bold;">${p.displayStatus}</span>
+                        </div>
+                    `;
+                    layer.bindPopup(popupContent);
+                }
+            }).addTo(map);
+
+            if (featuresToRender.length > 0 && !window._boundsSet) {
+                map.fitBounds(geojsonLayer.getBounds());
+                window._boundsSet = true;
+            }
+        }
+
+        dateSelect.addEventListener('change', loadParcels);
+        speciesSelect.addEventListener('change', loadParcels);
+        radiusSelect.addEventListener('change', () => renderParcels(allParcelsData));
+
+        resetBtn.addEventListener('click', () => {
+            dateSelect.value = getLocalDateTimeString();
+            speciesSelect.value = 'all';
+            radiusSelect.value = 'none';
+            centerPoint = null;
+            if (radiusCircle) {
+                map.removeLayer(radiusCircle);
+                radiusCircle = null;
+            }
+            loadParcels();
+        });
+
+        fetchSpeciesList().then(loadParcels);
+    </script>
+</body>
+</html>

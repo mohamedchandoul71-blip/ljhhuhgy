@@ -1,0 +1,15 @@
+{
+  "name": "cactus-flowering-map",
+  "version": "1.0.0",
+  "description": "Interactive Cactus & Eucalyptus Flowering Map for Beekeepers",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "process-data": "node scripts/processData.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "shapefile": "^0.6.6",
+    "xlsx": "^0.18.5"
+  }
+}

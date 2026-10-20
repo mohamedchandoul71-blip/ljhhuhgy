@@ -205,7 +205,7 @@
         style(feature) {
           const months = feature.properties?.floweringMonths || [];
           const flowering = selectedMonth !== null && months.includes(selectedMonth);
-          return { fillColor: flowering ? '#e74c3c' : '#3498db', weight: 1.5, opacity: 1, color: '#fff', fillOpacity: 0.6 };
+          return { fillColor: flowering ? '#e74c3c' : '#3498db', weight: 2, opacity: 1, color: flowering ? '#9d251c' : '#174d70', fillOpacity: 0.78 };
         },
         onEachFeature(feature, layer) {
           layer.bindPopup(() => popupHtml(feature));

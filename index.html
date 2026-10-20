@@ -79,9 +79,9 @@
     <div id="error-msg" role="alert"></div>
     <div id="data-note"></div>
     <div class="legend">
-      <strong>Flowering status for selected month</strong>
-      <div class="legend-item"><span class="swatch" style="background:#e74c3c"></span><span>Expected to be flowering</span></div>
-      <div class="legend-item"><span class="swatch" style="background:#3498db"></span><span>Not expected / no period recorded</span></div>
+      <strong>Plant colours</strong>
+      <div id="plant-legend"></div>
+      <p style="font-size:.8rem;color:#60736a;margin-top:10px">Each colour represents a plant name. Select a date and open a parcel to see its expected flowering status.</p>
     </div>
   </aside>
   <main id="map" aria-label="Interactive parcel map"></main>
@@ -150,25 +150,69 @@
       errorEl.textContent = message;
       errorEl.style.display = 'block';
     }
+    const plantPalette = [
+      '#2e7d32', '#1565c0', '#ef6c00', '#8e24aa', '#00838f',
+      '#c62828', '#558b2f', '#6d4c41', '#3949ab', '#ad1457',
+      '#0277bd', '#9e9d24', '#5e35b1', '#00897b', '#f4511e',
+      '#7cb342', '#4527a0', '#00acc1', '#d81b60', '#757575'
+    ];
+    let plantColorByName = new Map();
+    function normalizedPlantName(value) {
+      const name = String(value ?? '').trim();
+      if (!name || /^\\d+(?:[.,]\\d+)?$/.test(name)) return '';
+      return name;
+    }
+    function plantNames(feature) {
+      const p = feature.properties || {};
+      const dominant = normalizedPlantName(p.dominantSpecies);
+      if (dominant) return [dominant];
+      return speciesList(feature).map(normalizedPlantName).filter(Boolean);
+    }
+    function plantColor(feature) {
+      const name = plantNames(feature)[0] || 'Plant not recorded';
+      if (!plantColorByName.has(name.toLocaleLowerCase())) {
+        plantColorByName.set(name.toLocaleLowerCase(), plantPalette[plantColorByName.size % plantPalette.length]);
+      }
+      return plantColorByName.get(name.toLocaleLowerCase());
+    }
     function populateSpecies() {
       const values = new Map();
-      dataset.features.forEach(feature => speciesList(feature).forEach(sp => {
+      dataset.features.forEach(feature => plantNames(feature).forEach(sp => {
         const key = sp.toLocaleLowerCase();
         if (key && !values.has(key)) values.set(key, sp);
       }));
-      [...values.values()].sort((a, b) => a.localeCompare(b)).forEach(sp => {
+      [...values.values()].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })).forEach(sp => {
         const option = document.createElement('option');
         option.value = sp;
         option.textContent = sp;
         speciesSelect.appendChild(option);
       });
+      // Assign a stable color to each displayed plant name.
+      [...values.values()].forEach(sp => {
+        const key = sp.toLocaleLowerCase();
+        if (!plantColorByName.has(key)) plantColorByName.set(key, plantPalette[plantColorByName.size % plantPalette.length]);
+      });
+      const legend = $('plant-legend');
+      legend.replaceChildren();
+      if (!values.size) {
+        legend.textContent = 'Plant names were not found in the joined data. Check the Excel species columns.';
+        return;
+      }
+      [...values.values()].forEach(sp => {
+        const item = document.createElement('div');
+        item.className = 'legend-item';
+        const swatch = document.createElement('span');
+        swatch.className = 'swatch';
+        swatch.style.background = plantColorByName.get(sp.toLocaleLowerCase());
+        const label = document.createElement('span');
+        label.textContent = sp;
+        item.append(swatch, label);
+        legend.appendChild(item);
+      });
     }
     function matchesSpecies(feature, selected) {
       if (selected === 'all') return true;
-      const target = selected.toLocaleLowerCase();
-      const p = feature.properties || {};
-      return speciesList(feature).some(sp => sp.toLocaleLowerCase() === target) ||
-        String(p.dominantSpecies || '').trim().toLocaleLowerCase() === target;
+      return plantNames(feature).some(sp => sp.toLocaleLowerCase() === selected.toLocaleLowerCase());
     }
     function matchesRadius(feature, centre, metres) {
       const point = geometryCenter(feature);
@@ -217,14 +261,13 @@
       uniqueEl.textContent = ids.size.toLocaleString() + ' unique parcel IDs (features can repeat IDs)';
       geojsonLayer = L.geoJSON({ type: 'FeatureCollection', features }, {
         style(feature) {
-          const months = feature.properties?.floweringMonths || [];
-          const flowering = selectedMonth !== null && months.includes(selectedMonth);
-          return { fillColor: flowering ? '#e74c3c' : '#3498db', weight: 2, opacity: 1, color: flowering ? '#9d251c' : '#174d70', fillOpacity: 0.78 };
+          const color = plantColor(feature);
+          return { fillColor: color, weight: 1.5, opacity: 1, color: '#26352d', fillOpacity: 0.72 };
         },
         onEachFeature(feature, layer) {
           layer.bindPopup(() => popupHtml(feature));
           const p = feature.properties || {};
-          const label = String(p.dominantSpecies || speciesList(feature)[0] || 'Plant not recorded').trim();
+          const label = String(plantNames(feature)[0] || 'Plant not recorded').trim();
           // Keep the plant name on the map instead of displaying parcel IDs.
           layer.bindTooltip(escapeHtml(label), {
             permanent: true,

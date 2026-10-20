@@ -216,7 +216,7 @@ async function buildStaticData() {
   fs.writeFileSync(auditPath, JSON.stringify({
     ...geoJSON.properties,
     unmatchedShapefileParcelIds: [...unmatchedShapeIds],
-    unmatchedExcelParcelIds,
+    unmatchedExcelParcelIds: unmatchedExcelIds,
     duplicateExcelParcelIds: [...duplicateExcelIds]
   }, null, 2));
 

@@ -1,0 +1,69 @@
+name: Build and deploy flowering map to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+      - fix/full-audit
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build map data
+        run: npm run build-data
+
+      - name: Verify generated files
+        run: |
+          test -s parcels.json
+          test -s index.html
+          node -e "const d=require('./parcels.json'); if(d.type!=='FeatureCollection'||!Array.isArray(d.features)||!d.features.length) process.exit(1); console.log('Validated GeoJSON features:',d.features.length)"
+          test -s data-audit.json
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Prepare static site
+        run: |
+          mkdir -p _site
+          cp index.html parcels.json _site/
+          test ! -f data-audit.json || cp data-audit.json _site/
+          touch _site/.nojekyll
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

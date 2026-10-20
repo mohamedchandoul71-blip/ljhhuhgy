@@ -30,20 +30,6 @@
     #map { min-width: 0; flex: 1; height: 100%; }
     .popup { min-width: 190px; line-height: 1.55; overflow-wrap: anywhere; }
     .popup strong { color: #243a2e; }
-    .plant-label {
-      background: rgba(255,255,255,.92);
-      border: 1px solid #2f684c;
-      border-radius: 4px;
-      box-shadow: 0 1px 3px #0003;
-      color: #173d2a;
-      font-size: 11px;
-      font-weight: 700;
-      line-height: 1.2;
-      padding: 2px 4px;
-      white-space: nowrap;
-    }
-    .plant-label:before { display: none; }
-    .leaflet-tooltip.plant-label { pointer-events: none; }
     @media (max-width: 700px) {
       body { height: auto; min-height: 100dvh; display: flex; flex-direction: column; }
       #sidebar { width: 100%; flex: 0 0 auto; padding: 15px; overflow: visible; }
@@ -78,11 +64,7 @@
     <div id="loading" role="status">Loading map data…</div>
     <div id="error-msg" role="alert"></div>
     <div id="data-note"></div>
-    <div class="legend">
-      <strong>Plant colours</strong>
-      <div id="plant-legend"></div>
-      <p style="font-size:.8rem;color:#60736a;margin-top:10px">Each colour represents a plant name. Select a date and open a parcel to see its expected flowering status.</p>
-    </div>
+    <div class="legend"><strong>Plant colours</strong><div id="plant-legend"></div><p style="font-size:.8rem;color:#60736a;margin-top:10px">Each colour represents a plant name. Select a date and open a parcel to see its expected flowering status.</p></div>
   </aside>
   <main id="map" aria-label="Interactive parcel map"></main>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
@@ -267,14 +249,7 @@
         onEachFeature(feature, layer) {
           layer.bindPopup(() => popupHtml(feature));
           const p = feature.properties || {};
-          const label = String(plantNames(feature)[0] || 'Plant not recorded').trim();
-          // Keep the plant name on the map instead of displaying parcel IDs.
-          layer.bindTooltip(escapeHtml(label), {
-            permanent: true,
-            direction: 'center',
-            className: 'plant-label',
-            opacity: 0.95
-          });
+          // Keep parcels clean: show only their species colour, without map labels.
         }
       }).addTo(map);
 

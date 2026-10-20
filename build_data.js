@@ -32,11 +32,17 @@ function normalizedHeaderMap(row) {
 
 function getCell(row, aliases) {
   const headers = normalizedHeaderMap(row);
+  const entries = [...headers.entries()];
+  const normalize = value => value.toLocaleLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[\s_-]+/g, '');
   for (const alias of aliases) {
-    const actual = headers.get(alias.toLocaleLowerCase().replace(/[\s_-]+/g, ''));
-    if (actual !== undefined && row[actual] != null && clean(row[actual]) !== '') {
-      return row[actual];
-    }
+    const actual = headers.get(normalize(alias));
+    if (actual !== undefined && row[actual] != null && clean(row[actual]) !== '') return row[actual];
+  }
+  for (const alias of aliases) {
+    const wanted = normalize(alias);
+    const match = entries.find(([header, actual]) =>
+      normalize(header).includes(wanted) && row[actual] != null && clean(row[actual]) !== '');
+    if (match) return row[match[1]];
   }
   return '';
 }
@@ -117,9 +123,9 @@ async function buildStaticData() {
     if (!key) { rowsWithoutId++; continue; }
     if (floweringById.has(key)) duplicateExcelIds.add(key);
 
-    const species = clean(getCell(row, ['espece', 'espèce', 'species', 'plant type']));
-    const dominant = clean(getCell(row, ['domin', 'dominante', 'dominantSpecies', 'dominant species']));
-    const floweringRaw = clean(getCell(row, ['flori', 'floraison', 'floweringPeriod', 'flowering period']));
+    const species = clean(getCell(row, ['espece', 'species', 'plant type', 'plante', 'vegetation']));
+    const dominant = clean(getCell(row, ['dominantSpecies', 'dominant species', 'dominante', 'domin']));
+    const floweringRaw = clean(getCell(row, ['floweringPeriod', 'flowering period', 'floraison', 'flori', 'mois']));
     floweringById.set(key, {
       speciesRaw: species,
       speciesList: parseSpecies(species),
@@ -187,6 +193,35 @@ async function buildStaticData() {
   }
 
   if (!features.length) throw new Error('The shapefile did not contain any features with geometry.');
+
+  // Correct an accidental latitude/longitude axis swap only when the complete
+  // coordinate extent strongly indicates Tunisia after swapping.
+  const collectXY = (value, out) => {
+    if (!Array.isArray(value)) return;
+    if (value.length >= 2 && typeof value[0] === 'number' && typeof value[1] === 'number') {
+      out.push([value[0], value[1]]);
+      return;
+    }
+    value.forEach(v => collectXY(v, out));
+  };
+  const allXY = [];
+  for (const feature of features) collectXY(feature.geometry.coordinates, allXY);
+  if (allXY.length) {
+    const originalFit = allXY.filter(([x, y]) => x >= 7 && x <= 12 && y >= 30 && y <= 38).length / allXY.length;
+    const swappedFit = allXY.filter(([x, y]) => y >= 7 && y <= 12 && x >= 30 && x <= 38).length / allXY.length;
+    if (swappedFit > 0.8 && originalFit < 0.2) {
+      const swap = value => {
+        if (!Array.isArray(value)) return value;
+        if (value.length >= 2 && typeof value[0] === 'number' && typeof value[1] === 'number') return [value[1], value[0], ...value.slice(2)];
+        return value.map(swap);
+      };
+      for (const feature of features) feature.geometry.coordinates = swap(feature.geometry.coordinates);
+      console.log('Corrected swapped latitude/longitude coordinates for Tunisia.');
+    }
+  }
+  const distinctSpecies = new Set(features.flatMap(feature => feature.properties.speciesList || [])).size;
+  console.log('Distinct species joined for dropdown:', distinctSpecies);
+  if (!distinctSpecies) console.warn('No species values joined: check Excel headers and parcel ID matching.');
 
   const unmatchedExcelIds = [...floweringById.keys()].filter(key => !shapeIds.has(key));
   const geoJSON = {
